@@ -11,6 +11,7 @@ import {
 
 export type DatabaseSchema = {
   status: Status
+  profile: Profile
   auth_session: AuthSession
   auth_state: AuthState
 }
@@ -20,6 +21,17 @@ export type Status = {
   authorDid: string
   status: string
   createdAt: string
+  indexedAt: string
+}
+
+export type Profile = {
+  did: string              // Primary key
+  displayName: string | null
+  description: string | null
+  avatarCid: string | null
+  avatarMimeType: string | null
+  bannerCid: string | null
+  bannerMimeType: string | null
   indexedAt: string
 }
 
@@ -72,6 +84,31 @@ migrations['001'] = {
     await db.schema.dropTable('auth_state').execute()
     await db.schema.dropTable('auth_session').execute()
     await db.schema.dropTable('status').execute()
+  },
+}
+
+migrations['002'] = {
+  async up(db: Kysely<unknown>) {
+    await db.schema
+      .createTable('profile')
+      .addColumn('did', 'varchar', (col) => col.primaryKey())
+      .addColumn('displayName', 'varchar')
+      .addColumn('description', 'varchar')
+      .addColumn('avatarCid', 'varchar')
+      .addColumn('avatarMimeType', 'varchar')
+      .addColumn('bannerCid', 'varchar')
+      .addColumn('bannerMimeType', 'varchar')
+      .addColumn('indexedAt', 'varchar', (col) => col.notNull())
+      .execute()
+
+    await db.schema
+      .createIndex('profile_did_idx')
+      .on('profile')
+      .column('did')
+      .execute()
+  },
+  async down(db: Kysely<unknown>) {
+    await db.schema.dropTable('profile').execute()
   },
 }
 
