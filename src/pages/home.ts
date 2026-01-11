@@ -36,6 +36,7 @@ export const STATUS_OPTIONS = [
 type Props = {
   statuses: Status[]
   didHandleMap: Record<string, string | undefined>
+  profileMap?: Record<string, { displayName: string | null } | undefined>
   profile?: { displayName?: string }
   myStatus?: Status
 }
@@ -47,7 +48,7 @@ export function home(props: Props) {
   })
 }
 
-function content({ statuses, didHandleMap, profile, myStatus }: Props) {
+function content({ statuses, didHandleMap, profileMap, profile, myStatus }: Props) {
   return html`<div id="root">
     <div class="error"></div>
     <div id="header">
@@ -89,6 +90,14 @@ function content({ statuses, didHandleMap, profile, myStatus }: Props) {
       </form>
       ${statuses.map((status, i) => {
         const handle = didHandleMap[status.authorDid] || status.authorDid
+        const cachedProfile = profileMap?.[status.authorDid]
+        const displayName = cachedProfile?.displayName
+
+        // Format: "DisplayName (@handle)" or "@handle" if no displayName
+        const authorDisplay = displayName
+          ? html`${displayName} <span class="handle">(@${handle})</span>`
+          : html`@${handle}`
+
         const date = ts(status)
         return html`
           <div class=${i === 0 ? 'status-line no-line' : 'status-line'}>
@@ -96,7 +105,7 @@ function content({ statuses, didHandleMap, profile, myStatus }: Props) {
               <div class="status">${status.status}</div>
             </div>
             <div class="desc">
-              <a class="author" href=${toBskyLink(handle)}>@${handle}</a>
+              <a class="author" href=${toBskyLink(handle)}>${authorDisplay}</a>
               ${date === TODAY
                 ? `is feeling ${status.status} today`
                 : `was feeling ${status.status} on ${date}`}
