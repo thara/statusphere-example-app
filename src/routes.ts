@@ -248,12 +248,6 @@ export const createRouter = (ctx: AppContext): RequestListener => {
         createdAt: row.createdAt,
         indexedAt: row.indexedAt,
       }))
-      const profileMap: Record<string, { displayName: string | null } | undefined> = {}
-      statusesWithProfiles.forEach(row => {
-        profileMap[row.authorDid] = {
-          displayName: row.displayName || null,
-        }
-      })
 
       // Map user DIDs to their domain-name handles
       const didHandleMap = await ctx.resolver.resolveDidsToHandles(
@@ -263,7 +257,7 @@ export const createRouter = (ctx: AppContext): RequestListener => {
       if (!agent) {
         // Serve the logged-out view
         return res.type('html').send(
-          page(home({ statuses, didHandleMap, profileMap }))
+          page(home({ statuses, didHandleMap }))
         )
       }
 
@@ -297,7 +291,7 @@ export const createRouter = (ctx: AppContext): RequestListener => {
       // Serve the logged-in view
       res
         .type('html')
-        .send(page(home({ statuses, didHandleMap, profileMap, profile, myStatus })))
+        .send(page(home({ statuses, didHandleMap, profile, myStatus })))
     }),
   )
 

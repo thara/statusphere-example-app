@@ -36,7 +36,6 @@ export const STATUS_OPTIONS = [
 type Props = {
   statuses: Status[]
   didHandleMap: Record<string, string | undefined>
-  profileMap?: Record<string, { displayName: string | null } | undefined>
   profile?: { displayName?: string }
   myStatus?: Status
 }
@@ -48,7 +47,7 @@ export function home(props: Props) {
   })
 }
 
-function content({ statuses, didHandleMap, profileMap, profile, myStatus }: Props) {
+function content({ statuses, didHandleMap, profile, myStatus }: Props) {
   return html`<div id="root">
     <div class="error"></div>
     <div id="header">
@@ -90,8 +89,7 @@ function content({ statuses, didHandleMap, profileMap, profile, myStatus }: Prop
       </form>
       ${statuses.map((status, i) => {
         const handle = didHandleMap[status.authorDid] || status.authorDid
-        const cachedProfile = profileMap?.[status.authorDid]
-        const displayName = cachedProfile?.displayName
+        const displayName = status?.displayName
 
         // Format: "DisplayName (@handle)" or "@handle" if no displayName
         const authorDisplay = displayName
