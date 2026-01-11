@@ -1,3 +1,4 @@
+import type { Profile } from '#/db'
 import { Agent } from '@atproto/api'
 import { TID } from '@atproto/common'
 import { OAuthResolverError } from '@atproto/oauth-client-node'
@@ -224,21 +225,34 @@ export const createRouter = (ctx: AppContext): RequestListener => {
       // If the user is signed in, get an agent which communicates with their server
       const agent = await getSessionAgent(req, res, ctx)
 
-      // Fetch data stored in our SQLite
-      const statuses = await ctx.db
+      // Fetch statuses with their associated profiles
+      const statusesWithProfiles = await ctx.db
         .selectFrom('status')
-        .selectAll()
-        .orderBy('indexedAt', 'desc')
+        .leftJoin('profile', 'status.authorDid', 'profile.did')
+        .select([
+          'status.uri',
+          'status.authorDid',
+          'status.status',
+          'status.createdAt',
+          'status.indexedAt',
+          'profile.displayName',
+        ])
+        .orderBy('status.indexedAt', 'desc')
         .limit(10)
         .execute()
-      const myStatus = agent
-        ? await ctx.db
-            .selectFrom('status')
-            .selectAll()
-            .where('authorDid', '=', agent.assertDid)
-            .orderBy('indexedAt', 'desc')
-            .executeTakeFirst()
-        : undefined
+      const statuses = statusesWithProfiles.map(row => ({
+        uri: row.uri,
+        authorDid: row.authorDid,
+        status: row.status,
+        createdAt: row.createdAt,
+        indexedAt: row.indexedAt,
+      }))
+      const profileMap: Record<string, { displayName: string | null } | undefined> = {}
+      statusesWithProfiles.forEach(row => {
+        profileMap[row.authorDid] = {
+          displayName: row.displayName || null,
+        }
+      })
 
       // Map user DIDs to their domain-name handles
       const didHandleMap = await ctx.resolver.resolveDidsToHandles(
@@ -247,8 +261,19 @@ export const createRouter = (ctx: AppContext): RequestListener => {
 
       if (!agent) {
         // Serve the logged-out view
-        return res.type('html').send(page(home({ statuses, didHandleMap })))
+        return res.type('html').send(
+          page(home({ statuses, didHandleMap, profileMap }))
+        )
       }
+
+      const myStatus = agent
+        ? await ctx.db
+            .selectFrom('status')
+            .selectAll()
+            .where('authorDid', '=', agent.assertDid)
+            .orderBy('indexedAt', 'desc')
+            .executeTakeFirst()
+        : undefined
 
       // Fetch additional information about the logged-in user
       const profileResponse = await agent.com.atproto.repo
