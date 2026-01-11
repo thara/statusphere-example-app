@@ -7,18 +7,17 @@ Sync profile records to display "DisplayName (@handle)" format instead of just "
 - Display format: "DisplayName (@handle)"
 - Cache full profile data (displayName, description, avatar, banner)
 - Display names should appear immediately when users post a status
-- Hybrid approach: Firehose ingestion + proactive caching on status post
+- Proactive caching on status post
 
 ## Architecture Overview
 
-This implementation uses a **hybrid caching strategy**:
+This implementation uses a **proactive caching strategy**:
 
-1. **Firehose Ingestion**: Passively listens for profile update events from the AT Protocol firehose
-2. **Proactive Caching**: Actively fetches and caches profiles when users post a status
-3. **Database Cache**: SQLite table stores profile data with LEFT JOIN to status table
-4. **Graceful Fallback**: Falls back to @handle if profile not cached
+1. **Proactive Caching**: Actively fetches and caches profiles when users post a status
+2. **Database Cache**: SQLite table stores profile data with LEFT JOIN to status table
+3. **Graceful Fallback**: Falls back to @handle if profile not cached
 
-This ensures display names appear immediately for active users while staying up-to-date with network changes.
+This ensures display names appear immediately when users post a status.
 
 ## Implementation Steps
 
@@ -77,66 +76,7 @@ migrations['002'] = {
 }
 ```
 
-### 2. Extend Firehose Ingester
-**File:** `src/ingester.ts`
-
-**Import Profile types** (line 2):
-```typescript
-import * as Profile from '#/lexicon/types/app/bsky/actor/profile'
-```
-
-**Add to filterCollections** (line 14):
-```typescript
-filterCollections: ['xyz.statusphere.status', 'app.bsky.actor.profile'],
-```
-
-**Add profile event handling** (after status handling, around line 48):
-```typescript
-// Handle profile records
-if (evt.collection === 'app.bsky.actor.profile') {
-  if (evt.event === 'create' || evt.event === 'update') {
-    const record = evt.record
-    if (Profile.isRecord(record) && Profile.validateRecord(record).success) {
-      logger.debug(
-        { did: evt.did, displayName: record.displayName, event: evt.event },
-        'ingesting profile'
-      )
-
-      // Extract blob CIDs if present
-      const avatarCid = record.avatar?.ref?.toString() || null
-      const avatarMimeType = record.avatar?.mimeType || null
-      const bannerCid = record.banner?.ref?.toString() || null
-      const bannerMimeType = record.banner?.mimeType || null
-
-      await db.insertInto('profile').values({
-        did: evt.did,
-        displayName: record.displayName || null,
-        description: record.description || null,
-        avatarCid,
-        avatarMimeType,
-        bannerCid,
-        bannerMimeType,
-        indexedAt: now.toISOString(),
-      }).onConflict((oc) =>
-        oc.column('did').doUpdateSet({
-          displayName: record.displayName || null,
-          description: record.description || null,
-          avatarCid,
-          avatarMimeType,
-          bannerCid,
-          bannerMimeType,
-          indexedAt: now.toISOString(),
-        })
-      ).execute()
-    }
-  } else if (evt.event === 'delete') {
-    logger.debug({ did: evt.did }, 'deleting profile')
-    await db.deleteFrom('profile').where('did', '=', evt.did).execute()
-  }
-}
-```
-
-### 3. Update Routes to Query Profiles
+### 2. Update Routes to Query Profiles
 **File:** `src/routes.ts`
 
 **Import Profile type** (top of file):
@@ -145,7 +85,7 @@ import type { Profile } from '#/db'
 import * as Profile from '#/lexicon/types/app/bsky/actor/profile'
 ```
 
-**Replace status query with JOIN** (around line 228-241):
+**Replace status query with JOIN** (around line 228-250):
 ```typescript
 // Fetch statuses with their associated profiles
 const statusesWithProfiles = await ctx.db
@@ -171,23 +111,11 @@ const statuses = statusesWithProfiles.map(row => ({
   createdAt: row.createdAt,
   indexedAt: row.indexedAt,
 }))
-
-const profileMap: Record<string, { displayName: string | null } | undefined> = {}
-statusesWithProfiles.forEach(row => {
-  profileMap[row.authorDid] = {
-    displayName: row.displayName || null,
-  }
-})
 ```
 
-**Pass profileMap to template**:
-```typescript
-res.type('html').send(
-  page(home({ statuses, didHandleMap, profileMap, profile, myStatus }))
-)
-```
+The `displayName` is included directly in each status object, so the template can access it via `status.displayName`.
 
-### 4. Update Homepage Display
+### 3. Update Homepage Display
 **File:** `src/pages/home.ts`
 
 **Update Props type** (line 36-41):
@@ -195,23 +123,18 @@ res.type('html').send(
 type Props = {
   statuses: Status[]
   didHandleMap: Record<string, string | undefined>
-  profileMap?: Record<string, { displayName: string | null } | undefined>
   profile?: { displayName?: string }
   myStatus?: Status
 }
 ```
 
-**Update content function signature** (line 50):
-```typescript
-function content({ statuses, didHandleMap, profileMap, profile, myStatus }: Props) {
-```
+Note: The `Status` type now includes a `displayName` property from the JOIN query.
 
-**Update status display** (replace lines 90-106):
+**Update status display** (around lines 90-113):
 ```typescript
 ${statuses.map((status, i) => {
   const handle = didHandleMap[status.authorDid] || status.authorDid
-  const cachedProfile = profileMap?.[status.authorDid]
-  const displayName = cachedProfile?.displayName
+  const displayName = status?.displayName
 
   // Format: "DisplayName (@handle)" or "@handle" if no displayName
   const authorDisplay = displayName
@@ -235,7 +158,7 @@ ${statuses.map((status, i) => {
 })}
 ```
 
-**Add CSS for handle styling**:
+**Note on CSS:** The `.handle` class styling should be added to your CSS file if not already present:
 ```css
 .handle {
   font-weight: normal;
@@ -243,7 +166,7 @@ ${statuses.map((status, i) => {
 }
 ```
 
-### 5. Cache Profile on Status Post
+### 4. Cache Profile on Status Post
 **File:** `src/routes.ts`
 
 **Add profile caching logic in POST /status handler** (after optimistic status update, before redirect):
@@ -340,13 +263,12 @@ try {
 - Index on `profile.did` optimizes JOIN operations
 - Migration is numbered '002' (sequential after '001')
 
-### Hybrid Caching Strategy
-- **Firehose Ingestion**: Passively updates profiles when users modify them on the network
-- **Proactive Caching**: Actively fetches profiles when users post a status
+### Proactive Caching Strategy
+- **Proactive Caching**: Actively fetches and caches profiles when users post a status
 - **Benefits**:
-  - Display names appear immediately for active users (proactive)
-  - Stays synchronized with network updates (firehose)
+  - Display names appear immediately for active users
   - Low overhead (only fetches when user posts)
+  - Simple implementation with minimal moving parts
   - No backfill needed on startup
 
 ### Data Flow
@@ -369,42 +291,30 @@ User posts status
 7. Display "DisplayName (@handle)" immediately
 ```
 
-Meanwhile, in the background:
-```
-Firehose emits events
-  ↓
-Ingester processes profile update events
-  ↓
-Updates SQLite profile cache
-  ↓
-Future homepage loads show updated display names
-```
+The Firehose continues to monitor status updates (xyz.statusphere.status), but does not currently track profile updates. Profiles are only cached when users actively post a status.
 
 ## Testing Checklist
 - [x] Database migration creates profile table
-- [x] Firehose logs "ingesting profile" messages
-- [x] Profile data appears in SQLite after updates
 - [x] Homepage shows displayName for cached profiles
 - [x] Homepage shows @handle for uncached profiles
 - [x] Profile cached on status post with "cached profile on status post" log
 - [x] Display name appears immediately after posting status
 - [x] Handle profiles with no displayName (show @handle)
-- [x] Handle profile deletions gracefully
 - [x] Profile fetch failure doesn't break status posting
 
 ## Critical Files
 1. `src/db.ts` - Profile table schema and migration
-2. `src/ingester.ts` - Firehose listener for profile update events
-3. `src/routes.ts` - JOIN profiles with statuses, cache on status post
-4. `src/pages/home.ts` - Display "DisplayName (@handle)" format
+2. `src/routes.ts` - JOIN profiles with statuses, cache on status post
+3. `src/pages/home.ts` - Display "DisplayName (@handle)" format
 
 ## Future Enhancements
 
 ### Possible Improvements (Not Implemented)
-1. **Backfill on Startup**: Fetch profiles for all existing DIDs in status table
-2. **Background Refresh**: Periodically refresh cached profiles (e.g., daily)
-3. **Profile on Login**: Cache profile when user logs in (not just on post)
-4. **Stale Profile Detection**: Track last update time and refresh profiles older than N days
-5. **Batch Profile Fetching**: Fetch multiple profiles in a single request for efficiency
+1. **Firehose Profile Ingestion**: Listen for `app.bsky.actor.profile` update events on the firehose to keep cached profiles in sync with network changes
+2. **Backfill on Startup**: Fetch profiles for all existing DIDs in status table
+3. **Background Refresh**: Periodically refresh cached profiles (e.g., daily)
+4. **Profile on Login**: Cache profile when user logs in (not just on post)
+5. **Stale Profile Detection**: Track last update time and refresh profiles older than N days
+6. **Batch Profile Fetching**: Fetch multiple profiles in a single request for efficiency
 
-These can be added later if needed, but the current hybrid approach solves the immediate problem of missing display names.
+These can be added later if needed, but the current proactive caching approach solves the immediate problem of missing display names for active users.
