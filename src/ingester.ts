@@ -1,4 +1,5 @@
 import type { Database } from '#/db'
+import * as Profile from '#/lexicon/types/app/bsky/actor/profile'
 import * as Status from '#/lexicon/types/xyz/statusphere/status'
 import { IdResolver, MemoryCache } from '@atproto/identity'
 import { Event, Firehose } from '@atproto/sync'
@@ -13,9 +14,9 @@ export function createIngester(db: Database) {
   return new Firehose({
     filterCollections: ['xyz.statusphere.status'],
     handleEvent: async (evt: Event) => {
+      const now = new Date()
       // Watch for write events
       if (evt.event === 'create' || evt.event === 'update') {
-        const now = new Date()
         const record = evt.record
 
         // If the write is a valid status update

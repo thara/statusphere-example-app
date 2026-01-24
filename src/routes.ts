@@ -1,3 +1,4 @@
+import type { Profile } from '#/db'
 import { Agent } from '@atproto/api'
 import { TID } from '@atproto/common'
 import { OAuthResolverError } from '@atproto/oauth-client-node'
@@ -224,21 +225,29 @@ export const createRouter = (ctx: AppContext): RequestListener => {
       // If the user is signed in, get an agent which communicates with their server
       const agent = await getSessionAgent(req, res, ctx)
 
-      // Fetch data stored in our SQLite
-      const statuses = await ctx.db
+      // Fetch statuses with their associated profiles
+      const statusesWithProfiles = await ctx.db
         .selectFrom('status')
-        .selectAll()
-        .orderBy('indexedAt', 'desc')
+        .leftJoin('profile', 'status.authorDid', 'profile.did')
+        .select([
+          'status.uri',
+          'status.authorDid',
+          'status.status',
+          'status.createdAt',
+          'status.indexedAt',
+          'profile.displayName',
+        ])
+        .orderBy('status.indexedAt', 'desc')
         .limit(10)
         .execute()
-      const myStatus = agent
-        ? await ctx.db
-            .selectFrom('status')
-            .selectAll()
-            .where('authorDid', '=', agent.assertDid)
-            .orderBy('indexedAt', 'desc')
-            .executeTakeFirst()
-        : undefined
+      const statuses = statusesWithProfiles.map(row => ({
+        uri: row.uri,
+        authorDid: row.authorDid,
+        status: row.status,
+        displayName: row.displayName || null,
+        createdAt: row.createdAt,
+        indexedAt: row.indexedAt,
+      }))
 
       // Map user DIDs to their domain-name handles
       const didHandleMap = await ctx.resolver.resolveDidsToHandles(
@@ -247,8 +256,19 @@ export const createRouter = (ctx: AppContext): RequestListener => {
 
       if (!agent) {
         // Serve the logged-out view
-        return res.type('html').send(page(home({ statuses, didHandleMap })))
+        return res.type('html').send(
+          page(home({ statuses, didHandleMap }))
+        )
       }
+
+      const myStatus = agent
+        ? await ctx.db
+            .selectFrom('status')
+            .selectAll()
+            .where('authorDid', '=', agent.assertDid)
+            .orderBy('indexedAt', 'desc')
+            .executeTakeFirst()
+        : undefined
 
       // Fetch additional information about the logged-in user
       const profileResponse = await agent.com.atproto.repo
@@ -342,6 +362,71 @@ export const createRouter = (ctx: AppContext): RequestListener => {
         ctx.logger.warn(
           { err },
           'failed to update computed view; ignoring as it should be caught by the firehose',
+        )
+      }
+
+      // Fetch and cache the user's profile
+      // This ensures their display name appears immediately on the homepage
+      try {
+        const profileResponse = await agent.com.atproto.repo
+          .getRecord({
+            repo: agent.assertDid,
+            collection: 'app.bsky.actor.profile',
+            rkey: 'self',
+          })
+          .catch(() => undefined)
+
+        if (profileResponse?.data) {
+          const profileRecord = profileResponse.data
+
+          if (
+            Profile.isRecord(profileRecord.value) &&
+            Profile.validateRecord(profileRecord.value).success
+          ) {
+            const record = profileRecord.value
+
+            // Extract blob CIDs if present
+            const avatarCid = record.avatar?.ref?.toString() || null
+            const avatarMimeType = record.avatar?.mimeType || null
+            const bannerCid = record.banner?.ref?.toString() || null
+            const bannerMimeType = record.banner?.mimeType || null
+
+            await ctx.db
+              .insertInto('profile')
+              .values({
+                did: agent.assertDid,
+                displayName: record.displayName || null,
+                description: record.description || null,
+                avatarCid,
+                avatarMimeType,
+                bannerCid,
+                bannerMimeType,
+                indexedAt: new Date().toISOString(),
+              })
+              .onConflict((oc) =>
+                oc.column('did').doUpdateSet({
+                  displayName: record.displayName || null,
+                  description: record.description || null,
+                  avatarCid,
+                  avatarMimeType,
+                  bannerCid,
+                  bannerMimeType,
+                  indexedAt: new Date().toISOString(),
+                }),
+              )
+              .execute()
+
+            ctx.logger.debug(
+              { did: agent.assertDid, displayName: record.displayName },
+              'cached profile on status post',
+            )
+          }
+        }
+      } catch (err) {
+        // Don't fail the status post if profile caching fails
+        ctx.logger.warn(
+          { err, did: agent.assertDid },
+          'failed to cache profile on status post; ignoring',
         )
       }
 
