@@ -14,6 +14,7 @@ import path from 'node:path'
 import type { AppContext } from '#/context'
 import { env } from '#/env'
 import * as Profile from '#/lexicon/types/app/bsky/actor/profile'
+import { fetchAndCacheProfile } from '#/profile-cache'
 import * as Status from '#/lexicon/types/xyz/statusphere/status'
 import { handler } from '#/lib/http'
 import { ifString } from '#/lib/util'
@@ -367,68 +368,12 @@ export const createRouter = (ctx: AppContext): RequestListener => {
 
       // Fetch and cache the user's profile
       // This ensures their display name appears immediately on the homepage
-      try {
-        const profileResponse = await agent.com.atproto.repo
-          .getRecord({
-            repo: agent.assertDid,
-            collection: 'app.bsky.actor.profile',
-            rkey: 'self',
-          })
-          .catch(() => undefined)
-
-        if (profileResponse?.data) {
-          const profileRecord = profileResponse.data
-
-          if (
-            Profile.isRecord(profileRecord.value) &&
-            Profile.validateRecord(profileRecord.value).success
-          ) {
-            const record = profileRecord.value
-
-            // Extract blob CIDs if present
-            const avatarCid = record.avatar?.ref?.toString() || null
-            const avatarMimeType = record.avatar?.mimeType || null
-            const bannerCid = record.banner?.ref?.toString() || null
-            const bannerMimeType = record.banner?.mimeType || null
-
-            await ctx.db
-              .insertInto('profile')
-              .values({
-                did: agent.assertDid,
-                displayName: record.displayName || null,
-                description: record.description || null,
-                avatarCid,
-                avatarMimeType,
-                bannerCid,
-                bannerMimeType,
-                indexedAt: new Date().toISOString(),
-              })
-              .onConflict((oc) =>
-                oc.column('did').doUpdateSet({
-                  displayName: record.displayName || null,
-                  description: record.description || null,
-                  avatarCid,
-                  avatarMimeType,
-                  bannerCid,
-                  bannerMimeType,
-                  indexedAt: new Date().toISOString(),
-                }),
-              )
-              .execute()
-
-            ctx.logger.debug(
-              { did: agent.assertDid, displayName: record.displayName },
-              'cached profile on status post',
-            )
-          }
-        }
-      } catch (err) {
-        // Don't fail the status post if profile caching fails
-        ctx.logger.warn(
-          { err, did: agent.assertDid },
-          'failed to cache profile on status post; ignoring',
-        )
-      }
+      await fetchAndCacheProfile(
+        agent.assertDid,
+        ctx.db,
+        ctx.idResolver,
+        ctx.logger,
+      )
 
       return res.redirect('/')
     }),
