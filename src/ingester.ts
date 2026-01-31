@@ -1,5 +1,5 @@
 import type { Database } from '#/db'
-import * as Profile from '#/lexicon/types/app/bsky/actor/profile'
+import { fetchAndCacheProfile } from '#/profile-cache'
 import * as Status from '#/lexicon/types/xyz/statusphere/status'
 import { IdResolver, MemoryCache } from '@atproto/identity'
 import { Event, Firehose } from '@atproto/sync'
@@ -9,8 +9,12 @@ import { env } from './env'
 const HOUR = 60e3 * 60
 const DAY = HOUR * 24
 
-export function createIngester(db: Database) {
-  const logger = pino({ name: 'firehose', level: env.LOG_LEVEL })
+export function createIngester(
+  db: Database,
+  idResolver: IdResolver,
+  logger: pino.Logger,
+) {
+  const firehoseLogger = logger.child({ name: 'firehose' })
   return new Firehose({
     filterCollections: ['xyz.statusphere.status'],
     handleEvent: async (evt: Event) => {
@@ -25,7 +29,7 @@ export function createIngester(db: Database) {
           Status.isRecord(record) &&
           Status.validateRecord(record).success
         ) {
-          logger.debug(
+          firehoseLogger.debug(
             { uri: evt.uri.toString(), status: record.status },
             'ingesting status',
           )
@@ -47,12 +51,26 @@ export function createIngester(db: Database) {
               }),
             )
             .execute()
+
+          // Check if we have the author's profile cached
+          const profile = await db
+            .selectFrom('profile')
+            .where('did', '=', evt.did)
+            .selectAll()
+            .executeTakeFirst()
+
+          if (!profile) {
+            // Fetch and cache profile asynchronously (don't block firehose processing)
+            fetchAndCacheProfile(evt.did, db, idResolver, firehoseLogger).catch(
+              () => {},
+            )
+          }
         }
       } else if (
         evt.event === 'delete' &&
         evt.collection === 'xyz.statusphere.status'
       ) {
-        logger.debug(
+        firehoseLogger.debug(
           { uri: evt.uri.toString(), did: evt.did },
           'deleting status',
         )
@@ -65,7 +83,7 @@ export function createIngester(db: Database) {
       }
     },
     onError: (err: unknown) => {
-      logger.error({ err }, 'error on firehose ingestion')
+      firehoseLogger.error({ err }, 'error on firehose ingestion')
     },
     excludeIdentity: true,
     excludeAccount: true,
