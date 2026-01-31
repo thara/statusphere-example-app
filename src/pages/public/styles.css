@@ -229,3 +229,43 @@ button:hover,
   display: block;
   margin-top: 1rem;
 }
+
+/* Status Counts Section */
+.status-counts {
+  margin-bottom: 10px;
+}
+
+.status-counts-header {
+  font-size: 0.9rem;
+  color: var(--gray-500);
+  margin-bottom: 8px;
+}
+
+.total-count {
+  font-weight: 600;
+}
+
+.status-counts-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.status-count-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background-color: var(--gray-100);
+  border-radius: 16px;
+  padding: 4px 10px;
+  font-size: 0.9rem;
+}
+
+.status-emoji {
+  font-size: 1.2rem;
+}
+
+.status-count {
+  color: var(--gray-700);
+  font-weight: 500;
+}

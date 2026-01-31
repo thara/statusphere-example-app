@@ -255,10 +255,18 @@ export const createRouter = (ctx: AppContext): RequestListener => {
         statuses.map((s) => s.authorDid),
       )
 
+      // Count statuses by emoji
+      const statusCounts = await ctx.db
+        .selectFrom('status')
+        .select(['status', (eb) => eb.fn.count<number>('uri').as('count')])
+        .groupBy('status')
+        .orderBy('count', 'desc')
+        .execute()
+
       if (!agent) {
         // Serve the logged-out view
         return res.type('html').send(
-          page(home({ statuses, didHandleMap }))
+          page(home({ statuses, didHandleMap, statusCounts }))
         )
       }
 
@@ -292,7 +300,7 @@ export const createRouter = (ctx: AppContext): RequestListener => {
       // Serve the logged-in view
       res
         .type('html')
-        .send(page(home({ statuses, didHandleMap, profile, myStatus })))
+        .send(page(home({ statuses, didHandleMap, statusCounts, profile, myStatus })))
     }),
   )
 
