@@ -33,9 +33,15 @@ export const STATUS_OPTIONS = [
   '🚀',
 ]
 
+type StatusCount = {
+  status: string
+  count: number
+}
+
 type Props = {
   statuses: Status[]
   didHandleMap: Record<string, string | undefined>
+  statusCounts: StatusCount[]
   profile?: { displayName?: string }
   myStatus?: Status
 }
@@ -47,7 +53,31 @@ export function home(props: Props) {
   })
 }
 
-function content({ statuses, didHandleMap, profile, myStatus }: Props) {
+function statusCountsSection(statusCounts: StatusCount[]) {
+  if (statusCounts.length === 0) return ''
+
+  const total = statusCounts.reduce((sum, sc) => sum + sc.count, 0)
+
+  return html`
+    <div class="status-counts card">
+      <div class="status-counts-header">
+        <span class="total-count">${total} statuses total</span>
+      </div>
+      <div class="status-counts-grid">
+        ${statusCounts.map(
+          ({ status, count }) => html`
+            <div class="status-count-item">
+              <span class="status-emoji">${status}</span>
+              <span class="status-count">${count}</span>
+            </div>
+          `
+        )}
+      </div>
+    </div>
+  `
+}
+
+function content({ statuses, didHandleMap, statusCounts, profile, myStatus }: Props) {
   return html`<div id="root">
     <div class="error"></div>
     <div id="header">
@@ -73,6 +103,7 @@ function content({ statuses, didHandleMap, profile, myStatus }: Props) {
               </div>
             </div>`}
       </div>
+      ${statusCountsSection(statusCounts)}
       <form action="/status" method="post" class="status-options">
         ${STATUS_OPTIONS.map(
           (status) =>
