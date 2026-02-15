@@ -13,6 +13,11 @@ import path from 'node:path'
 
 import type { AppContext } from '#/context'
 import { env } from '#/env'
+import {
+  fetchAndCacheFollows,
+  getFollowedDids,
+  isFollowCacheStale,
+} from '#/follow-cache'
 import * as Profile from '#/lexicon/types/app/bsky/actor/profile'
 import { fetchAndCacheProfile } from '#/profile-cache'
 import * as Status from '#/lexicon/types/xyz/statusphere/status'
@@ -114,6 +119,15 @@ export const createRouter = (ctx: AppContext): RequestListener => {
         session.did = oauth.session.did
 
         await session.save()
+
+        // Sync follows in the background (don't block redirect)
+        const agent = new Agent(oauth.session)
+        void fetchAndCacheFollows(
+          oauth.session.did,
+          agent,
+          ctx.db,
+          ctx.logger,
+        )
       } catch (err) {
         ctx.logger.error({ err }, 'oauth callback failed')
       }
@@ -226,8 +240,23 @@ export const createRouter = (ctx: AppContext): RequestListener => {
       // If the user is signed in, get an agent which communicates with their server
       const agent = await getSessionAgent(req, res, ctx)
 
-      // Fetch statuses with their associated profiles
-      const statusesWithProfiles = await ctx.db
+      const filter = (req as Request).query.filter as string | undefined
+
+      // If logged in and follow cache is stale, refresh in background
+      if (agent) {
+        const stale = await isFollowCacheStale(agent.assertDid, ctx.db)
+        if (stale) {
+          void fetchAndCacheFollows(
+            agent.assertDid,
+            agent,
+            ctx.db,
+            ctx.logger,
+          )
+        }
+      }
+
+      // Build the status query with optional follow filter
+      let statusQuery = ctx.db
         .selectFrom('status')
         .leftJoin('profile', 'status.authorDid', 'profile.did')
         .select([
@@ -240,8 +269,24 @@ export const createRouter = (ctx: AppContext): RequestListener => {
         ])
         .orderBy('status.indexedAt', 'desc')
         .limit(10)
-        .execute()
-      const statuses = statusesWithProfiles.map(row => ({
+
+      if (filter === 'following' && agent) {
+        const followedDids = await getFollowedDids(agent.assertDid, ctx.db)
+        if (followedDids.length > 0) {
+          statusQuery = statusQuery.where(
+            'status.authorDid',
+            'in',
+            followedDids,
+          )
+        } else {
+          // No follows — return empty results
+          statusQuery = statusQuery.where('status.authorDid', '=', '__none__')
+        }
+      }
+
+      // Fetch statuses with their associated profiles
+      const statusesWithProfiles = await statusQuery.execute()
+      const statuses = statusesWithProfiles.map((row) => ({
         uri: row.uri,
         authorDid: row.authorDid,
         status: row.status,
@@ -257,19 +302,17 @@ export const createRouter = (ctx: AppContext): RequestListener => {
 
       if (!agent) {
         // Serve the logged-out view
-        return res.type('html').send(
-          page(home({ statuses, didHandleMap }))
-        )
+        return res
+          .type('html')
+          .send(page(home({ statuses, didHandleMap })))
       }
 
-      const myStatus = agent
-        ? await ctx.db
-            .selectFrom('status')
-            .selectAll()
-            .where('authorDid', '=', agent.assertDid)
-            .orderBy('indexedAt', 'desc')
-            .executeTakeFirst()
-        : undefined
+      const myStatus = await ctx.db
+        .selectFrom('status')
+        .selectAll()
+        .where('authorDid', '=', agent.assertDid)
+        .orderBy('indexedAt', 'desc')
+        .executeTakeFirst()
 
       // Fetch additional information about the logged-in user
       const profileResponse = await agent.com.atproto.repo
@@ -292,7 +335,9 @@ export const createRouter = (ctx: AppContext): RequestListener => {
       // Serve the logged-in view
       res
         .type('html')
-        .send(page(home({ statuses, didHandleMap, profile, myStatus })))
+        .send(
+          page(home({ statuses, didHandleMap, profile, myStatus, filter })),
+        )
     }),
   )
 

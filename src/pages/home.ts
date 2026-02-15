@@ -38,6 +38,7 @@ type Props = {
   didHandleMap: Record<string, string | undefined>
   profile?: { displayName?: string }
   myStatus?: Status
+  filter?: string
 }
 
 export function home(props: Props) {
@@ -47,7 +48,9 @@ export function home(props: Props) {
   })
 }
 
-function content({ statuses, didHandleMap, profile, myStatus }: Props) {
+function content({ statuses, didHandleMap, profile, myStatus, filter }: Props) {
+  const isFollowing = filter === 'following'
+
   return html`<div id="root">
     <div class="error"></div>
     <div id="header">
@@ -87,30 +90,47 @@ function content({ statuses, didHandleMap, profile, myStatus }: Props) {
             </button>`,
         )}
       </form>
-      ${statuses.map((status, i) => {
-        const handle = didHandleMap[status.authorDid] || status.authorDid
-        const displayName = status?.displayName
+      ${profile
+        ? html`<div class="feed-tabs">
+            <a href="/" class=${isFollowing ? 'tab' : 'tab active'}>All</a>
+            <a
+              href="/?filter=following"
+              class=${isFollowing ? 'tab active' : 'tab'}
+              >Following</a
+            >
+          </div>`
+        : html``}
+      ${isFollowing && statuses.length === 0
+        ? html`<div class="empty-state">
+            No statuses from your follows yet.
+          </div>`
+        : statuses.map((status, i) => {
+            const handle = didHandleMap[status.authorDid] || status.authorDid
+            const displayName = status?.displayName
 
-        // Format: "DisplayName (@handle)" or "@handle" if no displayName
-        const authorDisplay = displayName
-          ? html`${displayName} <span class="handle">(@${handle})</span>`
-          : html`@${handle}`
+            // Format: "DisplayName (@handle)" or "@handle" if no displayName
+            const authorDisplay = displayName
+              ? html`${displayName}
+                  <span class="handle">(@${handle})</span>`
+              : html`@${handle}`
 
-        const date = ts(status)
-        return html`
-          <div class=${i === 0 ? 'status-line no-line' : 'status-line'}>
-            <div>
-              <div class="status">${status.status}</div>
-            </div>
-            <div class="desc">
-              <a class="author" href=${toBskyLink(handle)}>${authorDisplay}</a>
-              ${date === TODAY
-                ? `is feeling ${status.status} today`
-                : `was feeling ${status.status} on ${date}`}
-            </div>
-          </div>
-        `
-      })}
+            const date = ts(status)
+            return html`
+              <div class=${i === 0 ? 'status-line no-line' : 'status-line'}>
+                <div>
+                  <div class="status">${status.status}</div>
+                </div>
+                <div class="desc">
+                  <a class="author" href=${toBskyLink(handle)}
+                    >${authorDisplay}</a
+                  >
+                  ${date === TODAY
+                    ? `is feeling ${status.status} today`
+                    : `was feeling ${status.status} on ${date}`}
+                </div>
+              </div>
+            `
+          })}
     </div>
   </div>`
 }

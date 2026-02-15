@@ -12,6 +12,7 @@ import {
 export type DatabaseSchema = {
   status: Status
   profile: Profile
+  follow: Follow
   auth_session: AuthSession
   auth_state: AuthState
 }
@@ -32,6 +33,13 @@ export type Profile = {
   avatarMimeType: string | null
   bannerCid: string | null
   bannerMimeType: string | null
+  indexedAt: string
+}
+
+export type Follow = {
+  uri: string
+  authorDid: string
+  subjectDid: string
   indexedAt: string
 }
 
@@ -109,6 +117,26 @@ migrations['002'] = {
   },
   async down(db: Kysely<unknown>) {
     await db.schema.dropTable('profile').execute()
+  },
+}
+
+migrations['003'] = {
+  async up(db: Kysely<unknown>) {
+    await db.schema
+      .createTable('follow')
+      .addColumn('uri', 'varchar', (col) => col.primaryKey())
+      .addColumn('authorDid', 'varchar', (col) => col.notNull())
+      .addColumn('subjectDid', 'varchar', (col) => col.notNull())
+      .addColumn('indexedAt', 'varchar', (col) => col.notNull())
+      .execute()
+    await db.schema
+      .createIndex('follow_authorDid_idx')
+      .on('follow')
+      .column('authorDid')
+      .execute()
+  },
+  async down(db: Kysely<unknown>) {
+    await db.schema.dropTable('follow').execute()
   },
 }
 

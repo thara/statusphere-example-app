@@ -223,6 +223,41 @@ button:hover,
   text-decoration: underline;
 }
 
+.feed-tabs {
+  display: flex;
+  flex-direction: row;
+  gap: 4px;
+  margin: 6px 0 4px;
+}
+
+.feed-tabs .tab {
+  padding: 4px 16px;
+  border-radius: 50px;
+  text-decoration: none;
+  color: var(--gray-500);
+  font-weight: 600;
+  font-size: 0.9rem;
+  background-color: #fff;
+  border: 1px solid var(--border-color);
+}
+
+.feed-tabs .tab:hover {
+  background-color: var(--primary-100);
+  color: var(--primary-600);
+}
+
+.feed-tabs .tab.active {
+  background-color: var(--primary-500);
+  color: #fff;
+  border-color: var(--primary-500);
+}
+
+.empty-state {
+  text-align: center;
+  color: var(--gray-500);
+  padding: 2rem 1rem;
+}
+
 .signup-cta {
   text-align: center;
   width: 100%;
